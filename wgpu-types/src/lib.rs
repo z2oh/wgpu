@@ -1607,6 +1607,31 @@ impl<L> RenderBundleDescriptor<L> {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct QuerySetDescriptor<'a> {
+    pub type_: QueryType<'a>,
+    pub count: u32,
+}
+
+#[derive(Clone, Debug)]
+pub enum QueryType<'a> {
+    Occlusion,
+    PipelineStatistics(&'a [PipelineStatisticName]),
+    Timestamp,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "trace", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
+pub enum PipelineStatisticName {
+    VertexShaderInvocations,
+    ClipperInvocations,
+    ClipperPrimitivesOut,
+    FragmentShaderInvocations,
+    ComputeShaderInvocations,
+}
+
 /// Type of data shaders will read from a texture.
 ///
 /// Only relevant for [`BindingType::SampledTexture`] bindings. See [`TextureFormat`] for more information.

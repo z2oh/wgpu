@@ -9,12 +9,12 @@ use crate::{
     device::Device,
     id::{
         AdapterId, BindGroupId, BindGroupLayoutId, BufferId, CommandBufferId, ComputePipelineId,
-        DeviceId, PipelineLayoutId, RenderBundleId, RenderPipelineId, SamplerId, ShaderModuleId,
-        SurfaceId, SwapChainId, TextureId, TextureViewId, TypedId,
+        DeviceId, PipelineLayoutId, QuerySetId, RenderBundleId, RenderPipelineId, SamplerId,
+        ShaderModuleId, SurfaceId, SwapChainId, TextureId, TextureViewId, TypedId,
     },
     instance::{Adapter, Instance, Surface},
     pipeline::{ComputePipeline, RenderPipeline, ShaderModule},
-    resource::{Buffer, Sampler, Texture, TextureView},
+    resource::{Buffer, Sampler, Texture, TextureView, QuerySet},
     span,
     swap_chain::SwapChain,
     Epoch, Index,
@@ -188,7 +188,7 @@ impl<T, I: TypedId> Storage<T, I> {
 /// If type A implements `Access<B>`, that means we are allowed to proceed
 /// with locking resource `B` after we lock `A`.
 ///
-/// The implenentations basically describe the edges in a directed graph
+/// The implementations basically describe the edges in a directed graph
 /// of lock transitions. As long as it doesn't have loops, we can have
 /// multiple concurrent paths on this graph (from multiple threads) without
 /// deadlocks, i.e. there is always a path whose next resource is not locked
@@ -228,6 +228,10 @@ impl<B: hal::Backend> Access<ComputePipeline<B>> for BindGroup<B> {}
 impl<B: hal::Backend> Access<RenderPipeline<B>> for Device<B> {}
 impl<B: hal::Backend> Access<RenderPipeline<B>> for BindGroup<B> {}
 impl<B: hal::Backend> Access<RenderPipeline<B>> for ComputePipeline<B> {}
+impl<B: hal::Backend> Access<QuerySet<B>> for Root<> {}
+impl<B: hal::Backend> Access<QuerySet<B>> for Device<B> {}
+impl<B: hal::Backend> Access<QuerySet<B>> for Sampler<B> {}
+impl<B: hal::Backend> Access<QuerySet<B>> for CommandBuffer<B> {}
 impl<B: hal::Backend> Access<ShaderModule<B>> for Device<B> {}
 impl<B: hal::Backend> Access<ShaderModule<B>> for BindGroupLayout<B> {}
 impl<B: hal::Backend> Access<Buffer<B>> for Root {}
@@ -237,6 +241,7 @@ impl<B: hal::Backend> Access<Buffer<B>> for BindGroup<B> {}
 impl<B: hal::Backend> Access<Buffer<B>> for CommandBuffer<B> {}
 impl<B: hal::Backend> Access<Buffer<B>> for ComputePipeline<B> {}
 impl<B: hal::Backend> Access<Buffer<B>> for RenderPipeline<B> {}
+impl<B: hal::Backend> Access<Buffer<B>> for QuerySet<B> {}
 impl<B: hal::Backend> Access<Texture<B>> for Root {}
 impl<B: hal::Backend> Access<Texture<B>> for Device<B> {}
 impl<B: hal::Backend> Access<Texture<B>> for Buffer<B> {}
@@ -338,6 +343,7 @@ pub trait GlobalIdentityHandlerFactory:
     + IdentityHandlerFactory<RenderBundleId>
     + IdentityHandlerFactory<RenderPipelineId>
     + IdentityHandlerFactory<ComputePipelineId>
+    + IdentityHandlerFactory<QuerySetId>
     + IdentityHandlerFactory<BufferId>
     + IdentityHandlerFactory<TextureId>
     + IdentityHandlerFactory<TextureViewId>
@@ -456,6 +462,7 @@ pub struct Hub<B: hal::Backend, F: GlobalIdentityHandlerFactory> {
     pub render_bundles: Registry<RenderBundle, RenderBundleId, F>,
     pub render_pipelines: Registry<RenderPipeline<B>, RenderPipelineId, F>,
     pub compute_pipelines: Registry<ComputePipeline<B>, ComputePipelineId, F>,
+    pub query_sets: Registry<QuerySet<B>, QuerySetId, F>,
     pub buffers: Registry<Buffer<B>, BufferId, F>,
     pub textures: Registry<Texture<B>, TextureId, F>,
     pub texture_views: Registry<TextureView<B>, TextureViewId, F>,
@@ -476,6 +483,7 @@ impl<B: GfxBackend, F: GlobalIdentityHandlerFactory> Hub<B, F> {
             render_bundles: Registry::new(B::VARIANT, factory, "RenderBundle"),
             render_pipelines: Registry::new(B::VARIANT, factory, "RenderPipeline"),
             compute_pipelines: Registry::new(B::VARIANT, factory, "ComputePipeline"),
+            query_sets: Registry::new(B::VARIANT, factory, "QuerySet"),
             buffers: Registry::new(B::VARIANT, factory, "Buffer"),
             textures: Registry::new(B::VARIANT, factory, "Texture"),
             texture_views: Registry::new(B::VARIANT, factory, "TextureView"),
@@ -596,6 +604,15 @@ impl<B: GfxBackend, F: GlobalIdentityHandlerFactory> Hub<B, F> {
                 unsafe {
                     device.raw.destroy_semaphore(swap_chain.semaphore);
                     suf.unconfigure_swapchain(&device.raw);
+                }
+            }
+        }
+
+        for element in self.query_sets.data.write().map.drain(..) {
+            if let Element::Occupied(query_set, _) = element {
+                let device = &devices[query_set.device_id.value];
+                unsafe {
+                    device.raw.destroy_query_pool(query_set.raw);
                 }
             }
         }

@@ -44,6 +44,7 @@ mod track;
 mod validation;
 
 pub use hal::pso::read_spirv;
+pub use hal::pso::PipelineStage;
 
 #[cfg(test)]
 use loom::sync::atomic;
