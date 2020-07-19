@@ -380,6 +380,31 @@ impl GlobalExt for wgc::hub::Global<IdentityPassThroughFactory> {
             A::DestroyRenderBundle(id) => {
                 self.render_bundle_destroy::<B>(id);
             }
+            A::CreateQuerySet {
+                id,
+                desc,
+            } => {
+                let type_ = match &desc.type_ {
+                    trace::QueryType::Occlusion =>
+                        wgt::QueryType::Occlusion,
+                    trace::QueryType::PipelineStatistics(pipeline_statistics) =>
+                        wgt::QueryType::PipelineStatistics(&pipeline_statistics),
+                    trace::QueryType::Timestamp =>
+                        wgt::QueryType::Timestamp,
+                };
+
+                self.device_create_query_set::<B>(
+                    device,
+                    &wgt::QuerySetDescriptor {
+                        type_,
+                        count: desc.count,
+                    },
+                    id,
+                );
+            }
+            A::DestroyQuerySet(id) => {
+                self.query_set_destroy::<B>(id);
+            }
             A::WriteBuffer {
                 id,
                 data,

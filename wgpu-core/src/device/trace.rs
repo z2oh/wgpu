@@ -122,6 +122,37 @@ impl RenderBundleDescriptor {
 #[derive(Debug)]
 #[cfg_attr(feature = "trace", derive(serde::Serialize))]
 #[cfg_attr(feature = "replay", derive(serde::Deserialize))]
+pub struct QuerySetDescriptor {
+    pub type_: QueryType,
+    pub count: u32,
+}
+
+#[derive(Debug)]
+#[cfg_attr(feature = "trace", derive(serde::Serialize))]
+#[cfg_attr(feature = "replay", derive(serde::Deserialize))]
+pub enum QueryType {
+    Occlusion,
+    PipelineStatistics(Vec<wgt::PipelineStatisticName>),
+    Timestamp,
+}
+
+#[cfg(feature = "trace")]
+impl QueryType {
+    pub(crate) fn new(query_type: &wgt::QueryType) -> Self {
+        match query_type {
+            wgt::QueryType::Occlusion =>
+                Self::Occlusion,
+            wgt::QueryType::PipelineStatistics(pipeline_statistic_names) =>
+                Self::PipelineStatistics(pipeline_statistic_names.to_vec()),
+            wgt::QueryType::Timestamp =>
+                Self::Timestamp,
+        }
+    }
+}
+
+#[derive(Debug)]
+#[cfg_attr(feature = "trace", derive(serde::Serialize))]
+#[cfg_attr(feature = "replay", derive(serde::Deserialize))]
 pub enum Action {
     Init {
         desc: wgt::DeviceDescriptor,
@@ -197,6 +228,11 @@ pub enum Action {
         base: crate::command::BasePass<crate::command::RenderCommand>,
     },
     DestroyRenderBundle(id::RenderBundleId),
+    CreateQuerySet {
+        id: id::QuerySetId,
+        desc: QuerySetDescriptor,
+    },
+    DestroyQuerySet(id::QuerySetId),
     WriteBuffer {
         id: id::BufferId,
         data: FileName,

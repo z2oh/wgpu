@@ -21,7 +21,8 @@ use std::sync::atomic::Ordering;
 
 const CLEANUP_WAIT_MS: u64 = 5000;
 
-/// A struct that keeps lists of resources that are no longer needed by the user.
+/// A struct that keeps lists of resources that are likely no longer needed by the user. These candidates for removal
+/// are moved to a `NonReferencedResources` object when it is verified they are no longer needed.
 #[derive(Debug, Default)]
 pub struct SuspectedResources {
     pub(crate) buffers: Vec<id::BufferId>,
@@ -34,6 +35,7 @@ pub struct SuspectedResources {
     pub(crate) bind_group_layouts: Vec<Stored<id::BindGroupLayoutId>>,
     pub(crate) pipeline_layouts: Vec<Stored<id::PipelineLayoutId>>,
     pub(crate) render_bundles: Vec<id::RenderBundleId>,
+    pub(crate) query_sets: Vec<id::QuerySetId>,
 }
 
 impl SuspectedResources {
@@ -48,6 +50,7 @@ impl SuspectedResources {
         self.bind_group_layouts.clear();
         self.pipeline_layouts.clear();
         self.render_bundles.clear();
+        self.query_sets.clear();
     }
 
     pub(crate) fn extend(&mut self, other: &Self) {
@@ -65,6 +68,7 @@ impl SuspectedResources {
         self.pipeline_layouts
             .extend_from_slice(&other.pipeline_layouts);
         self.render_bundles.extend_from_slice(&other.render_bundles);
+        self.query_sets.extend_from_slice(&other.query_sets);
     }
 
     pub(crate) fn add_trackers(&mut self, trackers: &TrackerSet) {
@@ -76,10 +80,11 @@ impl SuspectedResources {
         self.compute_pipelines.extend(trackers.compute_pipes.used());
         self.render_pipelines.extend(trackers.render_pipes.used());
         self.render_bundles.extend(trackers.bundles.used());
+        self.query_sets.extend(trackers.query_sets.used());
     }
 }
 
-/// A struct that keeps lists of resources that are no longer needed.
+/// A struct that keeps lists of resources that are no longer needed by the user, but are still in use by the GPU.
 #[derive(Debug)]
 struct NonReferencedResources<B: hal::Backend> {
     buffers: Vec<(B::Buffer, MemoryBlock<B>)>,
@@ -94,6 +99,7 @@ struct NonReferencedResources<B: hal::Backend> {
     graphics_pipes: Vec<B::GraphicsPipeline>,
     descriptor_set_layouts: Vec<B::DescriptorSetLayout>,
     pipeline_layouts: Vec<B::PipelineLayout>,
+    query_sets: Vec<B::QueryPool>,
 }
 
 impl<B: hal::Backend> NonReferencedResources<B> {
@@ -109,6 +115,7 @@ impl<B: hal::Backend> NonReferencedResources<B> {
             graphics_pipes: Vec::new(),
             descriptor_set_layouts: Vec::new(),
             pipeline_layouts: Vec::new(),
+            query_sets: Vec::new(),
         }
     }
 
@@ -123,6 +130,7 @@ impl<B: hal::Backend> NonReferencedResources<B> {
         self.graphics_pipes.extend(other.graphics_pipes);
         assert!(other.descriptor_set_layouts.is_empty());
         assert!(other.pipeline_layouts.is_empty());
+        self.query_sets.extend(other.query_sets);
     }
 
     unsafe fn clean(
@@ -174,6 +182,9 @@ impl<B: hal::Backend> NonReferencedResources<B> {
         }
         for raw in self.pipeline_layouts.drain(..) {
             device.destroy_pipeline_layout(raw);
+        }
+        for raw in self.query_sets.drain(..) {
+            device.destroy_query_pool(raw);
         }
     }
 }

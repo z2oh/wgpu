@@ -230,3 +230,22 @@ impl<B: hal::Backend> Borrow<()> for Sampler<B> {
         &DUMMY_SELECTOR
     }
 }
+
+#[derive(Debug)]
+pub struct QuerySet<B: hal::Backend> {
+    pub(crate) raw: B::QueryPool,
+    pub(crate) device_id: Stored<DeviceId>,
+    pub(crate) life_guard: LifeGuard,
+}
+
+impl<B: hal::Backend> Borrow<RefCount> for QuerySet<B> {
+    fn borrow(&self) -> &RefCount {
+        self.life_guard.ref_count.as_ref().unwrap()
+    }
+}
+
+impl<B: hal::Backend> Borrow<()> for QuerySet<B> {
+    fn borrow(&self) -> &() {
+        &DUMMY_SELECTOR
+    }
+}

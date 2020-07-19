@@ -8,12 +8,14 @@ mod bundle;
 mod compute;
 mod render;
 mod transfer;
+mod query;
 
 pub(crate) use self::allocator::CommandAllocator;
 pub use self::bundle::*;
 pub use self::compute::*;
 pub use self::render::*;
 pub use self::transfer::*;
+pub use self::query::*;
 
 use crate::{
     device::{all_buffer_stages, all_image_stages},

@@ -334,7 +334,8 @@ impl<B: GfxBackend> Device<B> {
             let (buffer_guard, mut token) = hub.buffers.read(&mut token);
             let (texture_guard, mut token) = hub.textures.read(&mut token);
             let (texture_view_guard, mut token) = hub.texture_views.read(&mut token);
-            let (sampler_guard, _) = hub.samplers.read(&mut token);
+            let (sampler_guard, mut token) = hub.samplers.read(&mut token);
+            let (query_set_guard, _) = hub.query_sets.read(&mut token);
 
             for id in trackers.buffers.used() {
                 if buffer_guard[id].life_guard.ref_count.is_none() {
@@ -369,6 +370,11 @@ impl<B: GfxBackend> Device<B> {
             for id in trackers.render_pipes.used() {
                 if render_pipe_guard[id].life_guard.ref_count.is_none() {
                     self.temp_suspected.render_pipelines.push(id);
+                }
+            }
+            for id in trackers.query_sets.used() {
+                if query_set_guard[id].life_guard.ref_count.is_none() {
+                    self.temp_suspected.query_sets.push(id);
                 }
             }
         }
@@ -2144,6 +2150,101 @@ impl<G: GlobalIdentityHandlerFactory> Global<G> {
             .suspected_resources
             .render_bundles
             .push(render_bundle_id);
+    }
+
+    pub fn device_create_query_set<B: GfxBackend>(
+        &self,
+        device_id: id::DeviceId,
+        desc: &wgt::QuerySetDescriptor,
+        id_in: Input<G, id::QuerySetId>,
+    ) -> id::QuerySetId {
+        let hub = B::hub(self);
+        let mut token = Token::root();
+
+        log::info!("Create QuerySet {:?} with ID {:?}", desc, id_in);
+
+        let (device_guard, mut token) = hub.devices.read(&mut token);
+        let device = &device_guard[device_id];
+        let query_set = {
+            use wgt::QueryType::*;
+            use wgt::PipelineStatisticName::*;
+            use hal::query::PipelineStatistic;
+            let hal_query_type = match desc.type_ {
+                Occlusion => hal::query::Type::Occlusion,
+                PipelineStatistics(pipeline_statistics) => {
+                    let ps = pipeline_statistics.iter().fold(PipelineStatistic::empty(), |acc, ps| match ps {
+                        VertexShaderInvocations =>
+                            acc | PipelineStatistic::VERTEX_SHADER_INVOCATIONS,
+                        ClipperInvocations =>
+                            acc | PipelineStatistic::CLIPPING_INVOCATIONS,
+                        ClipperPrimitivesOut =>
+                            acc | PipelineStatistic::CLIPPING_PRIMITIVES,
+                        FragmentShaderInvocations =>
+                            acc | PipelineStatistic::FRAGMENT_SHADER_INVOCATIONS,
+                        ComputeShaderInvocations =>
+                            acc | PipelineStatistic::COMPUTE_SHADER_INVOCATIONS,
+                    });
+                    hal::query::Type::PipelineStatistics(ps)
+                },
+                Timestamp => hal::query::Type::Timestamp,
+            };
+
+            resource::QuerySet {
+                raw: unsafe { device.raw.create_query_pool(hal_query_type, desc.count).unwrap() },
+                device_id: Stored {
+                    value: device_id,
+                    ref_count: device.life_guard.add_ref(),
+                },
+                life_guard: LifeGuard::new(),
+            }
+        };
+
+        let ref_count = query_set.life_guard.add_ref();
+
+        let id = hub.query_sets.register_identity(id_in, query_set, &mut token);
+        log::info!("Created QuerySet {:?} with {:?}", id, desc);
+        #[cfg(feature = "trace")]
+        match device.trace {
+            Some(ref trace) => {
+                trace.lock().add(trace::Action::CreateQuerySet {
+                    id,
+                    desc: trace::QuerySetDescriptor {
+                        type_: trace::QueryType::new(&desc.type_),
+                        count: desc.count,
+                    },
+                })
+            }
+            None => (),
+        };
+
+        device
+            .trackers
+            .lock()
+            .query_sets
+            .init(id, ref_count, PhantomData)
+            .unwrap();
+
+        id
+    }
+
+    pub fn query_set_destroy<B: GfxBackend>(&self, query_set_id: id::QuerySetId) {
+        let hub = B::hub(self);
+        let mut token = Token::root();
+
+        log::info!("QuerySet {:?} is dropped", query_set_id);
+        let device_id = {
+            let (mut query_set_guard, _) = hub.query_sets.write(&mut token);
+            let query_set = &mut query_set_guard[query_set_id];
+            query_set.life_guard.ref_count.take();
+            query_set.device_id.value
+        };
+
+        let (device_guard, mut token) = hub.devices.read(&mut token);
+        device_guard[device_id]
+            .lock_life(&mut token)
+            .suspected_resources
+            .query_sets
+            .push(query_set_id);
     }
 
     pub fn device_create_render_pipeline<B: GfxBackend>(
